@@ -1,0 +1,105 @@
+{
+  "Comment": "Durable polling workflow — checks a status on a configurable interval and shuts down when the target status is met or max attempts is reached.",
+  "StartAt": "CheckStatus",
+  "States": {
+    "CheckStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CheckStatusFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "process_id.$": "$.Payload.process_id",
+        "status.$": "$.Payload.status",
+        "is_complete.$": "$.Payload.is_complete",
+        "attempts.$": "$.Payload.attempts",
+        "poll_interval_seconds.$": "$.Payload.poll_interval_seconds",
+        "max_attempts.$": "$.Payload.max_attempts",
+        "target_status.$": "$.Payload.target_status"
+      },
+      "Next": "IsComplete",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PollFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "IsComplete": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.is_complete",
+          "BooleanEquals": true,
+          "Next": "OnComplete"
+        },
+        {
+          "Variable": "$.attempts",
+          "NumericGreaterThanEqualsPath": "$.max_attempts",
+          "Next": "MaxAttemptsExceeded"
+        }
+      ],
+      "Default": "WaitForNextPoll"
+    },
+    "WaitForNextPoll": {
+      "Type": "Wait",
+      "SecondsPath": "$.poll_interval_seconds",
+      "Next": "CheckStatus"
+    },
+    "OnComplete": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${OnCompleteFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": null,
+      "End": true,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PollFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "MaxAttemptsExceeded": {
+      "Type": "Fail",
+      "Error": "MaxAttemptsExceeded",
+      "Cause": "The maximum number of polling attempts was reached without the target status being met."
+    },
+    "PollFailed": {
+      "Type": "Fail",
+      "Error": "PollFailed",
+      "Cause": "An unrecoverable error occurred during polling."
+    }
+  }
+}

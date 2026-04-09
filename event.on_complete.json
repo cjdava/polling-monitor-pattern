@@ -1,0 +1,9 @@
+{
+  "process_id": "test-process-1",
+  "status": "COMPLETED",
+  "is_complete": true,
+  "attempts": 2,
+  "poll_interval_seconds": 2,
+  "max_attempts": 3,
+  "target_status": "COMPLETED"
+}

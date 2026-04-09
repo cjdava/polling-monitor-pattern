@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Lambda Durable Polling Pattern
+  Polls a status on a configurable interval using Step Functions + Lambda.
+  The workflow sleeps between checks (Wait state) and shuts down when the
+  target status is met or the maximum number of attempts is exhausted.
+
+# ---------------------------------------------------------------------------
+# Parameters — override these at deploy time or edit config.json defaults
+# ---------------------------------------------------------------------------
+Parameters:
+  PollIntervalSeconds:
+    Type: Number
+    Default: 120
+    Description: Seconds to wait between each polling attempt (e.g. 120 = 2 minutes)
+    MinValue: 1
+
+  MaxAttempts:
+    Type: Number
+    Default: 5
+    Description: Maximum number of polling attempts before the workflow fails
+
+  TargetStatus:
+    Type: String
+    Default: COMPLETED
+    Description: The status value that signals completion and shuts the workflow down
+
+# ---------------------------------------------------------------------------
+# Globals
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 128
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # --- Lambda: checks the job status on every poll cycle -------------------
+  CheckStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-check-status"
+      CodeUri: src/check_status/
+      Handler: handler.lambda_handler
+      Description: Checks the current status of a job and returns whether it is complete
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # TODO: Add any additional policies your status-check logic requires, e.g.:
+        # - DynamoDBReadPolicy:
+        #     TableName: !Ref MyTable
+        # - Statement:
+        #     - Effect: Allow
+        #       Action: glue:GetJobRun
+        #       Resource: "*"
+
+  # --- Lambda: runs once when the target status is met ---------------------
+  OnCompleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-on-complete"
+      CodeUri: src/on_complete/
+      Handler: handler.lambda_handler
+      Description: Executes post-completion logic after the target status is reached
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # TODO: Add policies for your completion logic, e.g. SNS publish, SFN start, etc.
+
+  # --- IAM Role for the Step Functions state machine -----------------------
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-statemachine-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambdaFunctions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt CheckStatusFunction.Arn
+                  - !GetAtt OnCompleteFunction.Arn
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogDelivery
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeResourcePolicies
+                Resource: "*"
+
+  # --- Step Functions state machine ----------------------------------------
+  PollingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${AWS::StackName}-polling"
+      DefinitionUri: statemachine/polling.asl.json
+      DefinitionSubstitutions:
+        CheckStatusFunctionArn: !GetAtt CheckStatusFunction.Arn
+        OnCompleteFunctionArn: !GetAtt OnCompleteFunction.Arn
+      Role: !GetAtt StateMachineRole.Arn
+      Logging:
+        Level: ERROR
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/states/${AWS::StackName}-polling"
+      RetentionInDays: 30
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  StateMachineArn:
+    Description: ARN of the polling state machine — pass this to start_execution.py
+    Value: !Ref PollingStateMachine
+    Export:
+      Name: !Sub "${AWS::StackName}-StateMachineArn"
+
+  CheckStatusFunctionArn:
+    Description: ARN of the CheckStatus Lambda
+    Value: !GetAtt CheckStatusFunction.Arn
+
+  OnCompleteFunctionArn:
+    Description: ARN of the OnComplete Lambda
+    Value: !GetAtt OnCompleteFunction.Arn
