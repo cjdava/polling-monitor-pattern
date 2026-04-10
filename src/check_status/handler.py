@@ -56,21 +56,14 @@ def get_process_status(process_id: str, attempts: int, max_attempts: int) -> str
     Fake status check for local/demo testing.
 
     Returns:
-        'IN_PROGRESS' for the first (max_attempts - 1) attempts.
-        'COMPLETED'   on attempt >= max_attempts.
+        'IN_PROGRESS' for all attempts, including when max_attempts is reached.
+        The workflow will exit via the MaxAttemptsExceeded branch in the
+        IsComplete Choice state, not via a COMPLETED status match.
 
     Replace this function with your real status-check logic for production.
     """
-    if attempts >= max_attempts:
-        logger.info(
-            "Simulated completion | process_id=%s attempts=%d",
-            process_id,
-            attempts,
-        )
-        return "COMPLETED"
-
     logger.info(
-        "Simulated in-progress | process_id=%s attempts=%d (completes at attempt %d)",
+        "Simulated in-progress | process_id=%s attempts=%d/%d",
         process_id,
         attempts,
         max_attempts,

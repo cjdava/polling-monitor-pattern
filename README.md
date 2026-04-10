@@ -1,47 +1,35 @@
-# Lambda Durable — Polling / Monitor Pattern
+# Polling Monitor Pattern
 
-A serverless durable polling workflow built with **AWS Lambda** + **AWS Step Functions**.  
-Polls a job status on a configurable interval, sleeps between checks (without keeping Lambda running), and shuts down automatically when the target status is met or the maximum number of attempts is exhausted.
+A serverless durable polling workflow built with **AWS Lambda** + **AWS Step Functions**.
+Polls a process status on a configurable interval, sleeps between checks (without keeping Lambda running), and shuts down automatically when the target status is met or the maximum number of attempts is exhausted.
 
 ---
 
 ## Table of Contents
 
-- [Lambda Durable — Polling / Monitor Pattern](#lambda-durable--polling--monitor-pattern)
-  - [Table of Contents](#table-of-contents)
-  - [The Problem](#the-problem)
-  - [Why Not Just Use `time.sleep()` in Lambda?](#why-not-just-use-timesleep-in-lambda)
-  - [The Solution: Durable Orchestration](#the-solution-durable-orchestration)
-  - [Architecture](#architecture)
-  - [How It Works](#how-it-works)
-  - [Project Structure](#project-structure)
-  - [Configuration](#configuration)
-  - [Getting Started](#getting-started)
-    - [Prerequisites](#prerequisites)
-    - [Install Python dependencies](#install-python-dependencies)
-  - [Local Testing](#local-testing)
-    - [Sample event files](#sample-event-files)
-  - [Deploying to AWS](#deploying-to-aws)
-  - [Starting an Execution](#starting-an-execution)
-  - [Implementing Your Own Status Check](#implementing-your-own-status-check)
-  - [Key Concepts](#key-concepts)
-    - [Amazon States Language (ASL)](#amazon-states-language-asl)
-    - [Wait State (the sleep)](#wait-state-the-sleep)
-    - [Choice State (branching)](#choice-state-branching)
-    - [ResultSelector](#resultselector)
-    - [Retry and Catch](#retry-and-catch)
-    - [AWS SAM (Serverless Application Model)](#aws-sam-serverless-application-model)
+- [The Problem](#the-problem)
+- [Why Not Just Use `time.sleep()` in Lambda?](#why-not-just-use-timesleep-in-lambda)
+- [The Solution: Durable Orchestration](#the-solution-durable-orchestration)
+- [Architecture](#architecture)
+- [How It Works](#how-it-works)
+- [Project Structure](#project-structure)
+- [Execution Input](#execution-input)
+- [Local Testing](#local-testing)
+- [Deploying to AWS](#deploying-to-aws)
+- [Starting an Execution](#starting-an-execution)
+- [Implementing Your Own Status Check](#implementing-your-own-status-check)
+- [Key Concepts](#key-concepts)
 
 ---
 
 ## The Problem
 
-You have a long-running job (e.g. a data pipeline, a third-party API call, an ECS task) and you want to:
+You have a long-running process (e.g. a data pipeline, a third-party API call, an ECS task) and you want to:
 
-- Check its status every 2 minutes.
+- Check its status every N minutes.
 - Do nothing (not consume compute) between checks.
-- Automatically stop once the job reaches a target status (e.g. `COMPLETED`).
-- Fail safely if the job never completes (max attempts guard).
+- Automatically stop once the process reaches a target status (e.g. `COMPLETED`).
+- Fail safely if the process never completes (max attempts guard).
 
 ---
 
@@ -51,7 +39,7 @@ You might think of doing this:
 
 ```python
 while True:
-    status = get_job_status(job_id)
+    status = get_process_status(process_id)
     if status == "COMPLETED":
         break
     time.sleep(120)  # sleep 2 minutes
@@ -61,7 +49,7 @@ while True:
 
 | Problem | Explanation |
 |---|---|
-| Lambda has a 15-minute max timeout | A job taking longer than 15 minutes will be killed mid-poll |
+| Lambda has a 15-minute max timeout | A process taking longer than 15 minutes will be killed mid-poll |
 | You pay for idle time | Lambda bills for every millisecond it is running, even while sleeping |
 | No durability | If Lambda crashes or times out, all state is lost |
 | Not observable | You cannot inspect the current state of the loop from outside |
@@ -82,34 +70,34 @@ Instead, we delegate orchestration to **AWS Step Functions**, which is designed 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Step Functions                            │
-│                                                             │
-│  ┌─────────────┐     ┌────────────┐     ┌────────────────┐ │
-│  │ CheckStatus │────▶│ IsComplete?│────▶│ WaitForNextPoll│ │
-│  │  (Lambda)   │     │  (Choice)  │  No │  (Wait state)  │ │
-│  └─────────────┘     └────────────┘     └────────┬───────┘ │
-│         ▲                  │ Yes                  │        │
-│         └──────────────────┼──────────────────────┘        │
-│                            ▼                               │
-│                    ┌──────────────┐                        │
-│                    │  OnComplete  │                        │
-│                    │  (Lambda)    │                        │
-│                    └──────┬───────┘                        │
-│                           │                               │
-│                    ┌──────▼───────┐                        │
-│                    │     END      │                        │
-│                    └──────────────┘                        │
-└─────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------+
+|                    Step Functions                           |
+|                                                             |
+|  +-------------+     +------------+     +----------------+ |
+|  | CheckStatus |---->| IsComplete?|---->| WaitForNextPoll| |
+|  |  (Lambda)   |     |  (Choice)  | No  |  (Wait state)  | |
+|  +-------------+     +------------+     +--------+-------+ |
+|         ^                  | Yes                 |         |
+|         +------------------+---------------------+         |
+|                            v                               |
+|                    +--------------+                        |
+|                    |  OnComplete  |                        |
+|                    |  (Lambda)    |                        |
+|                    +------+-------+                        |
+|                           |                               |
+|                    +------v-------+                        |
+|                    |     END      |                        |
+|                    +--------------+                        |
++-------------------------------------------------------------+
 ```
 
 ---
 
 ## How It Works
 
-1. **Start**: You invoke `start_execution.py` with a `job_id`. It calls the Step Functions API to start a new execution, passing in all configuration (interval, max attempts, target status).
+1. **Start**: Trigger the state machine with an execution input containing your `process_id` and polling config.
 
-2. **CheckStatus** (Lambda): Runs on each poll tick. Calls `get_job_status()` with the `job_id`, increments the attempt counter, and returns whether the status matches the target.
+2. **CheckStatus** (Lambda): Runs on each poll tick. Calls `get_process_status()`, increments the attempt counter, and returns whether the status matches the target.
 
 3. **IsComplete** (Choice state): Inspects the Lambda result.
    - If `is_complete == true` → go to **OnComplete**.
@@ -127,7 +115,7 @@ Instead, we delegate orchestration to **AWS Step Functions**, which is designed 
 ## Project Structure
 
 ```
-lambda-durable/
+polling-monitor-pattern/
 ├── statemachine/
 │   └── polling.asl.json          # Step Functions workflow definition (Amazon States Language)
 ├── src/
@@ -135,44 +123,35 @@ lambda-durable/
 │   │   └── handler.py            # Lambda: runs on every poll tick
 │   └── on_complete/
 │       └── handler.py            # Lambda: runs once when the target status is met
-├── template.yaml                 # AWS SAM infrastructure definition
-├── config.json                   # Default configuration values
+├── template.yaml                 # AWS SAM template (app infrastructure)
+├── buildspec.yml                 # CodeBuild spec (sam package → packaged.yaml)
+├── codepipeline.yaml             # CloudFormation template for the CI/CD pipeline
 ├── start_execution.py            # Script to kick off a new polling execution
 ├── event.check_status.json       # Sample event for local Lambda testing
-├── event.on_complete.json        # Sample event for local Lambda testing
-└── requirements.txt              # Python dependencies
+└── event.on_complete.json        # Sample event for local Lambda testing
 ```
 
 ---
 
-## Configuration
+## Execution Input
 
-All polling parameters are configurable at runtime — no code changes needed.
+All polling parameters are passed at execution time via the Step Functions input — no code or infrastructure changes needed.
 
-| Parameter | Default | Description |
+| Field | Required | Description |
 |---|---|---|
-| `poll_interval_seconds` | `120` | Seconds to wait between each poll (e.g. `120` = 2 minutes) |
-| `max_attempts` | `30` | Maximum number of polls before the workflow fails |
-| `target_status` | `COMPLETED` | The status string that signals the job is done |
-| `job_id` | _(required)_ | Identifier of the job to poll |
+| `process_id` | Yes | Identifier of the process to poll |
+| `target_status` | Yes | The status string that signals completion (e.g. `COMPLETED`) |
+| `poll_interval_seconds` | Yes | Seconds to wait between each poll |
+| `max_attempts` | Yes | Maximum number of polls before the workflow fails |
 
-Edit `config.json` to change defaults, or pass overrides via CLI flags.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for `sam local invoke`)
-- Python 3.12+
-- AWS credentials configured (`aws configure`)
-
-### Install Python dependencies
-
-```bash
-pip install -r requirements.txt
+Example:
+```json
+{
+  "process_id": "my-process-123",
+  "target_status": "COMPLETED",
+  "poll_interval_seconds": 120,
+  "max_attempts": 30
+}
 ```
 
 ---
@@ -181,7 +160,7 @@ pip install -r requirements.txt
 
 You can test individual Lambda functions locally using SAM + Docker.
 
-> **Note:** Full Step Functions orchestration (Wait state, state transitions) cannot be run locally. Only individual Lambda functions can be invoked locally via SAM.
+> **Note:** Full Step Functions orchestration (Wait state, state transitions) cannot be run locally. Only individual Lambda functions can be invoked via SAM.
 
 **1. Build the project**
 ```bash
@@ -198,12 +177,10 @@ sam local invoke CheckStatusFunction --event event.check_status.json
 sam local invoke OnCompleteFunction --event event.on_complete.json
 ```
 
-### Sample event files
-
 `event.check_status.json` — simulates the first poll tick:
 ```json
 {
-  "job_id": "test-job-1",
+  "process_id": "test-process-1",
   "target_status": "COMPLETED",
   "poll_interval_seconds": 2,
   "max_attempts": 3,
@@ -211,10 +188,10 @@ sam local invoke OnCompleteFunction --event event.on_complete.json
 }
 ```
 
-`event.on_complete.json` — simulates the final state when the job is done:
+`event.on_complete.json` — simulates successful completion:
 ```json
 {
-  "job_id": "test-job-1",
+  "process_id": "test-process-1",
   "status": "COMPLETED",
   "is_complete": true,
   "attempts": 2,
@@ -228,67 +205,80 @@ sam local invoke OnCompleteFunction --event event.on_complete.json
 
 ## Deploying to AWS
 
+This project uses a **CodePipeline CI/CD pipeline**. Pushing to the `main` branch automatically builds and deploys the app.
+
+### One-time pipeline setup
+
+Deploy `codepipeline.yaml` once to create the pipeline infrastructure:
+
 ```bash
-sam build
-sam deploy --guided
+aws cloudformation deploy \
+  --template-file codepipeline.yaml \
+  --stack-name polling-monitor-pattern-pipeline \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+  --region ap-southeast-1
 ```
 
-Follow the prompts. After deployment, copy the `StateMachineArn` from the outputs and update `config.json`:
+After that, every push to `main` triggers: **CodeBuild** (`sam package`) → **CloudFormation** (deploys `template.yaml`).
 
-```json
-{
-  "state_machine_arn": "arn:aws:states:us-east-1:123456789012:stateMachine:YOUR_STACK_NAME-polling",
-  ...
-}
-```
+### Prerequisites
+
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) (for local testing)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (required for `sam local invoke`)
+- AWS CLI configured (`aws configure`)
+- A GitHub CodeStar Connection ARN (set as `GitHubConnectionArn` in `codepipeline.yaml`)
 
 ---
 
 ## Starting an Execution
 
+**AWS Console:**
+1. Go to **Step Functions → State machines → `polling-monitor-pattern-polling`**
+2. Click **Start execution** and paste the execution input JSON
+
+**AWS CLI:**
 ```bash
-# Use defaults from config.json
-python start_execution.py my-job-123
-
-# Override poll interval and max attempts
-python start_execution.py my-job-123 --interval 60 --max-attempts 10
-
-# Override the target status
-python start_execution.py my-job-123 --target DONE
+aws stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:ap-southeast-1:<account-id>:stateMachine:polling-monitor-pattern-polling \
+  --input '{"process_id":"my-process-123","target_status":"COMPLETED","poll_interval_seconds":120,"max_attempts":30}' \
+  --region ap-southeast-1
 ```
 
-You can monitor the execution in the **AWS Step Functions console** under your state machine name.
+**Script:**
+```bash
+python start_execution.py my-process-123 --interval 120 --max-attempts 30
+```
 
 ---
 
 ## Implementing Your Own Status Check
 
-Open `src/check_status/handler.py` and replace the `get_job_status()` function with your real logic:
+Open `src/check_status/handler.py` and replace `get_process_status()` with your real logic:
 
 ```python
-def get_job_status(job_id: str) -> str:
-    # Example: query an external REST API
-    import requests
-    response = requests.get(f"https://api.example.com/jobs/{job_id}")
-    return response.json()["status"]
+def get_process_status(process_id: str, attempts: int, max_attempts: int) -> str:
+    # Example: query DynamoDB
+    table = boto3.resource("dynamodb").Table("MyTable")
+    return table.get_item(Key={"process_id": process_id})["Item"]["status"]
 ```
 
 Other common examples:
 
 ```python
-# DynamoDB
-table = boto3.resource("dynamodb").Table("Jobs")
-return table.get_item(Key={"job_id": job_id})["Item"]["status"]
-
 # AWS Glue
 glue = boto3.client("glue")
-run = glue.get_job_run(JobName="my-glue-job", RunId=job_id)
+run = glue.get_job_run(JobName="my-glue-job", RunId=process_id)
 return run["JobRun"]["JobRunState"]
 
 # ECS Task
 ecs = boto3.client("ecs")
-tasks = ecs.describe_tasks(cluster="my-cluster", tasks=[job_id])
+tasks = ecs.describe_tasks(cluster="my-cluster", tasks=[process_id])
 return tasks["tasks"][0]["lastStatus"]
+
+# External REST API
+import urllib.request, json
+with urllib.request.urlopen(f"https://api.example.com/jobs/{process_id}") as r:
+    return json.loads(r.read())["status"]
 ```
 
 Then add your post-completion logic in `src/on_complete/handler.py`.
@@ -298,19 +288,19 @@ Then add your post-completion logic in `src/on_complete/handler.py`.
 ## Key Concepts
 
 ### Amazon States Language (ASL)
-The Step Functions workflow is defined in `statemachine/polling.asl.json` using **Amazon States Language** — a JSON-based specification for describing state machines. Each state has a `Type` (Task, Choice, Wait, Fail, etc.) and transitions to the next state.
+The Step Functions workflow is defined in `statemachine/polling.asl.json`. Each state has a `Type` (Task, Choice, Wait, Fail) and transitions to the next state.
 
 ### Wait State (the sleep)
-The `WaitForNextPoll` state uses `"SecondsPath": "$.poll_interval_seconds"` to read the interval dynamically from the execution input. While in this state, **no compute is running and no cost is incurred**.
+`WaitForNextPoll` uses `"SecondsPath": "$.poll_interval_seconds"` to read the interval from the execution input. While waiting, **no compute runs and no cost is incurred**.
 
 ### Choice State (branching)
-`IsComplete` is a `Choice` state — it contains conditional rules that branch the workflow based on data in the state. It checks `is_complete` and `attempts` to decide what to do next.
+`IsComplete` branches on `is_complete` and `attempts` — routing to `OnComplete`, `MaxAttemptsExceeded`, or back to `WaitForNextPoll`.
 
 ### ResultSelector
-After Lambda returns a response, the `ResultSelector` in `CheckStatus` extracts only the fields we care about from the Lambda response envelope (`$.Payload.*`), keeping the state clean and minimal.
+After Lambda returns, `ResultSelector` extracts fields from `$.Payload.*`, keeping only what the next state needs.
 
 ### Retry and Catch
-Every Task state includes `Retry` rules for transient Lambda errors (throttling, service exceptions) with exponential backoff, and a `Catch` block to route unrecoverable errors to the `PollFailed` terminal state.
+Every Task state retries on transient Lambda errors (throttling, service exceptions) with exponential backoff, and catches unrecoverable errors to route them to `PollFailed`.
 
-### AWS SAM (Serverless Application Model)
-`template.yaml` is a **SAM template** — a higher-level abstraction over AWS CloudFormation. It defines Lambdas, Step Functions state machines, IAM roles, and log groups in a concise YAML format. SAM transforms this into raw CloudFormation during deployment.
+### AWS SAM
+`template.yaml` is a SAM template. `sam package` (run by CodeBuild) zips the Lambda code, uploads it to S3, and produces a plain CloudFormation template (`packaged.yaml`) for the Deploy stage.

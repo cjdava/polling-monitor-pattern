@@ -7,26 +7,6 @@ Description: >
   target status is met or the maximum number of attempts is exhausted.
 
 # ---------------------------------------------------------------------------
-# Parameters — override these at deploy time or edit config.json defaults
-# ---------------------------------------------------------------------------
-Parameters:
-  PollIntervalSeconds:
-    Type: Number
-    Default: 120
-    Description: Seconds to wait between each polling attempt (e.g. 120 = 2 minutes)
-    MinValue: 1
-
-  MaxAttempts:
-    Type: Number
-    Default: 5
-    Description: Maximum number of polling attempts before the workflow fails
-
-  TargetStatus:
-    Type: String
-    Default: COMPLETED
-    Description: The status value that signals completion and shuts the workflow down
-
-# ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
 Globals:
