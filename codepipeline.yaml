@@ -10,15 +10,17 @@ Description: >
 Parameters:
   StackName:
     Type: String
-    Default: lambda-durable
+    Default: polling-monitor-pattern
     Description: Name for the application CloudFormation stack to be deployed
 
   GitHubOwner:
     Type: String
+    Default: cjdava
     Description: GitHub username or organisation that owns the repository
 
   SourceRepo:
     Type: String
+    Default: polling-monitor-pattern
     Description: GitHub repository name (e.g. polling-monitor-pattern)
 
   SourceBranch:
@@ -28,6 +30,7 @@ Parameters:
 
   GitHubConnectionArn:
     Type: String
+    Default: arn:aws:codeconnections:ap-southeast-1:867556698366:connection/9a1a5a9f-d873-4d5b-873c-f82e92e15157
     Description: >-
       ARN of the AWS CodeStar Connection to GitHub.
       Find it in the AWS Console under CodePipeline → Settings → Connections.
