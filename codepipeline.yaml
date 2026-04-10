@@ -175,6 +175,15 @@ Resources:
                   - iam:GetRole
                   - iam:PassRole
                   - iam:TagRole
+                  - iam:UntagRole
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:ListTags
+                  - states:TagResource
+                  - states:UntagResource
+                  - states:ListTagsForResource
+                  - logs:TagLogGroup
+                  - logs:TagResource
                   - logs:CreateLogGroup
                   - logs:DeleteLogGroup
                   - logs:PutRetentionPolicy
