@@ -1,0 +1,293 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  CodePipeline CI/CD for Lambda Durable Polling Pattern v2.
+  Source: GitHub (CodeStar Connection) -> Build: CodeBuild (sam build + sam package)
+  -> Deploy: CloudFormation (deploys SAM-packaged template.yaml).
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  StackName:
+    Type: String
+    Default: polling-monitor-pattern-v2
+    Description: Name for the application CloudFormation stack to be deployed
+
+  GitHubOwner:
+    Type: String
+    Default: cjdava
+    Description: GitHub username or organisation that owns the repository
+
+  SourceRepo:
+    Type: String
+    Default: polling-monitor-pattern
+    Description: GitHub repository name (e.g. polling-monitor-pattern)
+
+  SourceBranch:
+    Type: String
+    Default: main
+    Description: Branch to trigger the pipeline on push
+
+  GitHubConnectionArn:
+    Type: String
+    Default: arn:aws:codeconnections:ap-southeast-1:867556698366:connection/9a1a5a9f-d873-4d5b-873c-f82e92e15157
+    Description: >-
+      ARN of the AWS CodeStar Connection to GitHub.
+      Find it in the AWS Console under CodePipeline -> Settings -> Connections.
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # --- S3 bucket for pipeline artifacts and Lambda packages ----------------
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-artifacts"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 30
+
+  # --- IAM Role for CodeBuild ----------------------------------------------
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-codebuild-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub "${ArtifactBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # --- IAM Role for CodePipeline -------------------------------------------
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-pipeline-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PipelinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: !Ref GitHubConnectionArn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub "${ArtifactBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: !GetAtt CodeBuildProject.Arn
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${StackName}/*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt CloudFormationDeployRole.Arn
+
+  # --- IAM Role for CloudFormation deploy action ---------------------------
+  CloudFormationDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-cfn-deploy-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudFormationDeployPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:ListTags
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:DescribeLogGroups
+                  - logs:TagLogGroup
+                  - logs:TagResource
+                  - s3:GetObject
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeStackEvents
+                Resource: "*"
+
+  # --- CodeBuild project ---------------------------------------------------
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-build"
+      Description: Builds and packages the v2 durable Lambda function
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: v2/buildspec.yml
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Value: !Ref ArtifactBucket
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      TimeoutInMinutes: 15
+
+  # --- CodePipeline --------------------------------------------------------
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "${AWS::StackName}-pipeline"
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+
+        # Stage 1 - Source: pull from GitHub on every push via CodeStar Connection
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                ConnectionArn: !Ref GitHubConnectionArn
+                FullRepositoryId: !Sub "${GitHubOwner}/${SourceRepo}"
+                BranchName: !Ref SourceBranch
+                DetectChanges: true
+              RunOrder: 1
+
+        # Stage 2 - Build: sam build (installs deps) + sam package (uploads to S3)
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
+
+        # Stage 3 - Deploy: run CloudFormation with the packaged template
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              InputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Ref StackName
+                TemplatePath: BuildOutput::packaged.yaml
+                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+                RoleArn: !GetAtt CloudFormationDeployRole.Arn
+              RunOrder: 1
+
+  # GitHub triggers are handled automatically by CodePipeline via the
+  # CodeStar Connection webhook (DetectChanges: true). No EventBridge rule needed.
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  PipelineName:
+    Description: Name of the CodePipeline
+    Value: !Ref Pipeline
+
+  ArtifactBucketName:
+    Description: S3 bucket used for artifacts and Lambda packages
+    Value: !Ref ArtifactBucket
+
+  PipelineUrl:
+    Description: Direct URL to the pipeline in the AWS Console
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${Pipeline}/view"

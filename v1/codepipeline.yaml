@@ -203,7 +203,7 @@ Resources:
       Description: Packages Lambda functions and uploads to S3
       Source:
         Type: CODEPIPELINE
-        BuildSpec: buildspec.yml
+        BuildSpec: v1/buildspec.yml
       Artifacts:
         Type: CODEPIPELINE
       Environment:
