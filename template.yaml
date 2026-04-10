@@ -103,7 +103,12 @@ Resources:
                 Action:
                   - logs:CreateLogGroup
                   - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
                   - logs:PutLogEvents
+                  - logs:PutResourcePolicy
                   - logs:DescribeLogGroups
                   - logs:DescribeResourcePolicies
                 Resource: "*"

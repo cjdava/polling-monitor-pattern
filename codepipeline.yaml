@@ -173,6 +173,7 @@ Resources:
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
                   - iam:GetRole
+                  - iam:GetRolePolicy
                   - iam:PassRole
                   - iam:TagRole
                   - iam:UntagRole
@@ -187,6 +188,8 @@ Resources:
                   - logs:CreateLogGroup
                   - logs:DeleteLogGroup
                   - logs:PutRetentionPolicy
+                  - logs:DescribeLogGroups
+                  - logs:DescribeResourcePolicies
                   - s3:GetObject
                   - cloudformation:CreateChangeSet
                   - cloudformation:DescribeStackEvents
