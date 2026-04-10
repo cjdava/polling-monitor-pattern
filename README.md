@@ -60,7 +60,7 @@ while True:
 
 Instead, we delegate orchestration to **AWS Step Functions**, which is designed exactly for this:
 
-- Step Functions manages the flow between states **durably** — state is persisted on AWS infrastructure, not in memory.
+- Step Functions manages the flow between states **durably** - state is persisted on AWS infrastructure, not in memory.
 - The `Wait` state tells Step Functions to pause execution for N seconds **without running any compute**. Lambda is not invoked and you pay nothing during the wait.
 - Each poll is a fresh, short-lived Lambda invocation.
 - The full execution history is visible in the AWS console.
@@ -135,7 +135,7 @@ polling-monitor-pattern/
 
 ## Execution Input
 
-All polling parameters are passed at execution time via the Step Functions input — no code or infrastructure changes needed.
+All polling parameters are passed at execution time via the Step Functions input - no code or infrastructure changes needed.
 
 | Field | Required | Description |
 |---|---|---|
@@ -177,7 +177,7 @@ sam local invoke CheckStatusFunction --event event.check_status.json
 sam local invoke OnCompleteFunction --event event.on_complete.json
 ```
 
-`event.check_status.json` — simulates the first poll tick:
+`event.check_status.json` - simulates the first poll tick:
 ```json
 {
   "process_id": "test-process-1",
@@ -188,7 +188,7 @@ sam local invoke OnCompleteFunction --event event.on_complete.json
 }
 ```
 
-`event.on_complete.json` — simulates successful completion:
+`event.on_complete.json` - simulates successful completion:
 ```json
 {
   "process_id": "test-process-1",
@@ -294,7 +294,7 @@ The Step Functions workflow is defined in `statemachine/polling.asl.json`. Each 
 `WaitForNextPoll` uses `"SecondsPath": "$.poll_interval_seconds"` to read the interval from the execution input. While waiting, **no compute runs and no cost is incurred**.
 
 ### Choice State (branching)
-`IsComplete` branches on `is_complete` and `attempts` — routing to `OnComplete`, `MaxAttemptsExceeded`, or back to `WaitForNextPoll`.
+`IsComplete` branches on `is_complete` and `attempts` - routing to `OnComplete`, `MaxAttemptsExceeded`, or back to `WaitForNextPoll`.
 
 ### ResultSelector
 After Lambda returns, `ResultSelector` extracts fields from `$.Payload.*`, keeping only what the next state needs.
