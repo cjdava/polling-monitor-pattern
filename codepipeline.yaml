@@ -178,6 +178,7 @@ Resources:
                   - logs:DeleteLogGroup
                   - logs:PutRetentionPolicy
                   - s3:GetObject
+                  - cloudformation:CreateChangeSet
                 Resource: "*"
 
   # --- CodeBuild project ---------------------------------------------------
