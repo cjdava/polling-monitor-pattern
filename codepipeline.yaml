@@ -44,7 +44,7 @@ Resources:
   ArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${AWS::StackName}-artifacts-${AWS::AccountId}-${AWS::Region}"
+      BucketName: !Sub "${AWS::StackName}-artifacts"
       VersioningConfiguration:
         Status: Enabled
       LifecycleConfiguration:
