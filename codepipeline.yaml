@@ -179,6 +179,7 @@ Resources:
                   - logs:PutRetentionPolicy
                   - s3:GetObject
                   - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeStackEvents
                 Resource: "*"
 
   # --- CodeBuild project ---------------------------------------------------
