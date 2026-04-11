@@ -1,8 +1,47 @@
 import logging
-from aws_durable_execution_sdk_python import DurableContext, durable_execution
+from aws_durable_execution_sdk_python import DurableContext, StepContext, durable_execution, durable_step
 from aws_durable_execution_sdk_python.config import Duration
 
 logging.getLogger().setLevel(logging.INFO)
+
+
+@durable_step
+def check_process_status(ctx: StepContext, process_id: str, attempt: int, max_attempts: int) -> str:
+    """
+    Stub status check — replace with your real logic, e.g.:
+        - Query DynamoDB for a job record
+        - Call an external REST API
+        - Check an AWS Glue job run state
+        - Describe an ECS task status
+    """
+    ctx.logger.info(
+        "Checking process status | process_id=%s attempt=%d/%d",
+        process_id,
+        attempt,
+        max_attempts,
+    )
+    return "IN_PROGRESS"
+
+
+@durable_step
+def on_complete(ctx: StepContext, process_id: str, status: str, attempts: int) -> dict:
+    """
+    Runs once when the target status is reached — replace with your real logic, e.g.:
+        - Publish to SNS
+        - Start a downstream Step Functions execution
+        - Update a DynamoDB record
+        - Send a webhook
+    """
+    ctx.logger.info(
+        "Process completed | process_id=%s status=%s attempts=%d",
+        process_id,
+        status,
+        attempts,
+    )
+    return {
+        "message": f"Process {process_id} completed with status {status}",
+        "attempts": attempts,
+    }
 
 
 @durable_execution
@@ -23,13 +62,12 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
             "max_attempts": 30
         }
     """
-    logger = context.logger
     process_id: str = event["process_id"]
     target_status: str = event["target_status"]
     poll_interval_seconds: int = event["poll_interval_seconds"]
     max_attempts: int = event["max_attempts"]
 
-    logger.info(
+    context.logger.info(
         "Starting polling monitor | process_id=%s target=%s max_attempts=%d",
         process_id,
         target_status,
@@ -40,11 +78,11 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
         # Each check is a named checkpoint — on replay, completed steps
         # return their stored result instantly without re-executing.
         status = context.step(
-            lambda _, _pid=process_id, _a=attempt, _m=max_attempts: get_process_status(_pid, _a, _m, logger),
+            check_process_status(process_id, attempt, max_attempts),
             name=f"check-status-{attempt}",
         )
 
-        logger.info(
+        context.logger.info(
             "Poll result | process_id=%s attempt=%d/%d status=%s",
             process_id,
             attempt,
@@ -53,9 +91,8 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
         )
 
         if status == target_status:
-            # Target reached — run completion logic inline as a checkpoint.
             result = context.step(
-                lambda _, _pid=process_id, _s=status, _a=attempt: handle_completion(_pid, _s, _a, logger),
+                on_complete(process_id, status, attempt),
                 name="on-complete",
             )
             return {
@@ -75,46 +112,3 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
         f"attempts={max_attempts} last_status={status}"
     )
 
-
-def get_process_status(process_id: str, attempt: int, max_attempts: int, logger) -> str:
-    """
-    Stub status check for local/demo testing.
-
-    Always returns IN_PROGRESS — the for loop raises an exception when
-    max_attempts is exhausted. Replace this with your real status-check logic.
-
-    Common examples:
-        - Query DynamoDB for a job record
-        - Call an external REST API
-        - Check an AWS Glue job run state
-        - Describe an ECS task status
-    """
-    logger.info(
-        "Checking process status | process_id=%s attempt=%d/%d",
-        process_id,
-        attempt,
-        max_attempts,
-    )
-    return "IN_PROGRESS"
-
-
-def handle_completion(process_id: str, status: str, attempts: int, logger) -> dict:
-    """
-    Runs once when the target status is reached.
-
-    Replace with your real completion logic, e.g.:
-        - Publish to SNS
-        - Start a downstream Step Functions execution
-        - Update a DynamoDB record
-        - Send a webhook
-    """
-    logger.info(
-        "Process completed | process_id=%s status=%s attempts=%d",
-        process_id,
-        status,
-        attempts,
-    )
-    return {
-        "message": f"Process {process_id} completed with status {status}",
-        "attempts": attempts,
-    }
