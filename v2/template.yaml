@@ -35,9 +35,35 @@ Resources:
         #     Action: glue:GetJobRun
         #     Resource: "*"
 
+  InvokerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-invoker"
+      CodeUri: src/invoker/
+      Handler: handler.lambda_handler
+      Timeout: 30
+      Description: >
+        Invokes the durable polling monitor Lambda asynchronously.
+        Pass process_id, target_status, poll_interval_seconds, max_attempts in the event.
+      Environment:
+        Variables:
+          DURABLE_FUNCTION_NAME: !GetAtt PollingMonitorFunction.Arn
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt PollingMonitorFunction.Arn
+
 Outputs:
   PollingMonitorFunctionArn:
     Description: ARN of the polling monitor Lambda function
     Value: !GetAtt PollingMonitorFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-PollingMonitorFunctionArn"
+
+  InvokerFunctionArn:
+    Description: ARN of the invoker Lambda function
+    Value: !GetAtt InvokerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-InvokerFunctionArn"
