@@ -25,15 +25,12 @@ Resources:
       Description: >
         Durable polling monitor. Checks a process status on a configurable
         interval with automatic checkpointing and fault tolerance.
+      DurableConfig:
+        ExecutionTimeout: 3600
+        RetentionPeriodInDays: 7
+      AutoPublishAlias: live
       Policies:
-        - AWSLambdaBasicExecutionRole
-        # TODO: Add policies for your status-check logic, e.g.:
-        # - DynamoDBReadPolicy:
-        #     TableName: !Ref MyTable
-        # - Statement:
-        #     Effect: Allow
-        #     Action: glue:GetJobRun
-        #     Resource: "*"
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicDurableExecutionRolePolicy
 
   InvokerFunction:
     Type: AWS::Serverless::Function
@@ -47,20 +44,26 @@ Resources:
         Pass process_id, target_status, poll_interval_seconds, max_attempts in the event.
       Environment:
         Variables:
-          DURABLE_FUNCTION_NAME: !GetAtt PollingMonitorFunction.Arn
+          DURABLE_FUNCTION_NAME: !Ref PollingMonitorFunction.Alias
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action: lambda:InvokeFunction
-            Resource: !GetAtt PollingMonitorFunction.Arn
+            Resource:
+              - !GetAtt PollingMonitorFunction.Arn
+              - !Ref PollingMonitorFunction.Alias
 
 Outputs:
   PollingMonitorFunctionArn:
     Description: ARN of the polling monitor Lambda function
     Value: !GetAtt PollingMonitorFunction.Arn
+
+  PollingMonitorAliasArn:
+    Description: Alias ARN to use for invocations (durable functions require qualified ARNs)
+    Value: !Ref PollingMonitorFunction.Alias
     Export:
-      Name: !Sub "${AWS::StackName}-PollingMonitorFunctionArn"
+      Name: !Sub "${AWS::StackName}-PollingMonitorAliasArn"
 
   InvokerFunctionArn:
     Description: ARN of the invoker Lambda function

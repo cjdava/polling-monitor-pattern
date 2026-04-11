@@ -79,8 +79,8 @@ def get_process_status(process_id: str, attempt: int, max_attempts: int) -> str:
     """
     Stub status check for local/demo testing.
 
-    Returns IN_PROGRESS for all attempts so the workflow exhausts max_attempts.
-    Replace this with your real status-check logic for production.
+    Always returns IN_PROGRESS — the for loop raises an exception when
+    max_attempts is exhausted. Replace this with your real status-check logic.
 
     Common examples:
         - Query DynamoDB for a job record
