@@ -1,5 +1,6 @@
 import logging
 from aws_durable_execution_sdk_python import DurableContext, durable_execution
+from aws_durable_execution_sdk_python.config import Duration
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -67,7 +68,7 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
         if attempt < max_attempts:
             # Sleep without consuming compute. Lambda is recycled during the
             # wait and replayed from this checkpoint when resumed.
-            context.wait(poll_interval_seconds)
+            context.wait(Duration.from_seconds(poll_interval_seconds))
 
     raise Exception(
         f"Max attempts reached | process_id={process_id} "
