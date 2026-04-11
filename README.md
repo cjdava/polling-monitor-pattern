@@ -314,38 +314,57 @@ On resume (invocation #2):
 ### v2 Architecture
 
 ```
-+--------------------------------------------------+
-|              Invoke (async)                      |
-|  InvokerFunction  ──────────>  PollingMonitor    |
-|  (standard Lambda)            Function:live      |
-|                               (durable Lambda)   |
-+--------------------------------------------------+
-         │                           │
-         │                    ┌──────▼──────┐
-         │                    │  Checkpoint │
-         │                    │    Store    │
-         │                    │  (managed   │
-         │                    │   by AWS)   │
-         │                    └──────┬──────┘
-         │                           │
-         │          resume after wait│
-         │                    ┌──────▼──────────────────────┐
-         │                    │  Replay → check-status-N    │
-         │                    │  wait → Replay → ...        │
-         │                    │  → on-complete → END        │
-         │                    └─────────────────────────────┘
-         │
-         └──> Returns immediately (InvocationType=Event)
+You (caller)
+     │
+     │  aws lambda invoke  (InvocationType=Event)
+     ▼
+┌─────────────────────┐
+│   InvokerFunction   │  ── returns immediately, fire-and-forget
+│  (standard Lambda)  │
+└──────────┬──────────┘
+           │  aws lambda invoke  (InvocationType=Event)
+           │  on alias ARN  :live
+           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    Durable Execution Lifecycle                    │
+│                                                                  │
+│  Invocation #1                                                   │
+│  ┌─────────────────────────────────┐                            │
+│  │  lambda_handler runs            │                            │
+│  │    check-status-1 ──► saved ✓   │                            │
+│  │    context.wait(N seconds)      │ ◄── Lambda terminates here │
+│  └─────────────────────────────────┘     no compute, no cost    │
+│                    │                                             │
+│            N seconds pass                                        │
+│                    │                                             │
+│  Invocation #2 (fresh cold start)                                │
+│  ┌─────────────────────────────────┐                            │
+│  │  lambda_handler runs from top   │                            │
+│  │    check-status-1 ──► replayed  │ (instant, no API call)     │
+│  │    check-status-2 ──► saved ✓   │                            │
+│  │    context.wait(N seconds)      │ ◄── Lambda terminates here │
+│  └─────────────────────────────────┘                            │
+│                    │                                             │
+│            (repeats until complete or max_attempts reached)      │
+│                    │                                             │
+│  Invocation #N                                                   │
+│  ┌─────────────────────────────────┐                            │
+│  │  check-status-1..N-1 replayed   │                            │
+│  │  check-status-N ──► COMPLETED   │                            │
+│  │  on-complete ──► saved ✓        │                            │
+│  │  handler returns ──► END        │ ◄── durable execution ends │
+│  └─────────────────────────────────┘                            │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### v2 How It Works
 
-1. **Invoke**: Call `InvokerFunction` with the polling config. It immediately returns — the durable execution runs asynchronously.
-2. **Poll cycle**: `PollingMonitorFunction` runs `check_process_status()` as a checkpointed step, named `check-status-{attempt}`.
-3. **Wait**: If not yet complete, `context.wait(Duration.from_seconds(poll_interval_seconds))` suspends the execution. Lambda terminates.
-4. **Resume**: After the wait, Lambda is re-invoked. The SDK replays from the top, skipping all previous checkpoints, and runs the next poll cycle.
-5. **Complete**: When `status == target_status`, `on_complete()` runs as a final checkpoint and the handler returns.
-6. **Exhausted**: If `max_attempts` is reached without hitting the target status, an exception is raised and the durable execution ends in failure.
+1. **Invoke**: Call `InvokerFunction` with the polling config. It immediately returns — the durable execution runs asynchronously in the background.
+2. **Poll cycle**: `PollingMonitorFunction` runs `check_process_status()` as a checkpointed step named `check-status-{attempt}`. The result is persisted before continuing.
+3. **Wait**: Status is not yet the target — `context.wait()` checkpoints the wait, then **Lambda terminates**. No compute runs during the wait.
+4. **Resume**: After the wait duration, AWS re-invokes the Lambda. The SDK replays the handler from the top, returning stored results for all past checkpoints instantly, then executes the next poll.
+5. **Complete**: `status == target_status` — `on_complete()` runs as a final checkpoint, the handler returns, and the durable execution ends successfully.
+6. **Exhausted**: `max_attempts` reached without hitting the target — an exception is raised and the durable execution ends in failure.
 
 ### v2 Project Structure
 
