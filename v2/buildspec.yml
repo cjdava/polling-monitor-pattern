@@ -31,3 +31,7 @@ phases:
   post_build:
     commands:
       - echo "sam build + package complete. packaged.yaml ready for Deploy stage."
+
+artifacts:
+  files:
+    - packaged.yaml
