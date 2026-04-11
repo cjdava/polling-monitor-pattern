@@ -1,0 +1,37 @@
+version: 0.2
+
+# ---------------------------------------------------------------------------
+# CodeBuild spec - Lambda Durable Polling Pattern v2 (SAM approach).
+#
+# What this does:
+#   1. Runs `sam build` from v2/ which installs aws-durable-execution-sdk-python
+#      and any other requirements.txt dependencies into the Lambda package.
+#   2. Runs `sam package` on the built template, uploading Lambda code to S3
+#      and producing packaged.yaml ready for the Deploy stage.
+# ---------------------------------------------------------------------------
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.13
+
+  pre_build:
+    commands:
+      - echo "Running sam build + package for v2..."
+
+  build:
+    commands:
+      - cd v2
+      - sam build --template-file template.yaml
+      - sam package
+          --template-file .aws-sam/build/template.yaml
+          --s3-bucket $ARTIFACT_BUCKET
+          --output-template-file ../packaged.yaml
+
+  post_build:
+    commands:
+      - echo "sam build + package complete. packaged.yaml ready for Deploy stage."
+  
+artifacts:
+  files:
+    - packaged.yaml

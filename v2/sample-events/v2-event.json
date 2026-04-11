@@ -1,0 +1,6 @@
+{
+  "process_id": "test-process-1",
+  "target_status": "COMPLETED",
+  "poll_interval_seconds": 10,
+  "max_attempts": 3
+}

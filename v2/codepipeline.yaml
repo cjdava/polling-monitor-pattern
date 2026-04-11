@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  CodePipeline CI/CD for Lambda Durable Polling Pattern.
-  Source: GitHub (CodeStar Connection) → Build: CodeBuild (sam package)
-  → Deploy: CloudFormation (deploys SAM-packaged template.yaml).
+  CodePipeline CI/CD for Lambda Durable Polling Pattern v2.
+  Source: GitHub (CodeStar Connection) -> Build: CodeBuild (sam build + sam package)
+  -> Deploy: CloudFormation (deploys SAM-packaged template.yaml).
 
 # ---------------------------------------------------------------------------
 # Parameters
@@ -10,7 +10,7 @@ Description: >
 Parameters:
   StackName:
     Type: String
-    Default: polling-monitor-pattern
+    Default: polling-monitor-pattern-v2
     Description: Name for the application CloudFormation stack to be deployed
 
   GitHubOwner:
@@ -33,7 +33,7 @@ Parameters:
     Default: arn:aws:codeconnections:ap-southeast-1:867556698366:connection/9a1a5a9f-d873-4d5b-873c-f82e92e15157
     Description: >-
       ARN of the AWS CodeStar Connection to GitHub.
-      Find it in the AWS Console under CodePipeline → Settings → Connections.
+      Find it in the AWS Console under CodePipeline -> Settings -> Connections.
 
 # ---------------------------------------------------------------------------
 # Resources
@@ -158,14 +158,26 @@ Resources:
                   - lambda:CreateFunction
                   - lambda:UpdateFunctionCode
                   - lambda:UpdateFunctionConfiguration
+                  - lambda:GetFunctionConfiguration
                   - lambda:DeleteFunction
                   - lambda:GetFunction
                   - lambda:AddPermission
                   - lambda:RemovePermission
-                  - states:CreateStateMachine
-                  - states:UpdateStateMachine
-                  - states:DeleteStateMachine
-                  - states:DescribeStateMachine
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:ListTags
+                  - lambda:PublishVersion
+                  - lambda:ListVersionsByFunction
+                  - lambda:CreateAlias
+                  - lambda:UpdateAlias
+                  - lambda:DeleteAlias
+                  - lambda:GetAlias
+                  - lambda:ListAliases
+                  - lambda:PutFunctionEventInvokeConfig
+                  - lambda:DeleteFunctionEventInvokeConfig
+                  - lambda:GetFunctionEventInvokeConfig
+                  - lambda:PutFunctionConcurrency
+                  - lambda:DeleteFunctionConcurrency
                   - iam:CreateRole
                   - iam:DeleteRole
                   - iam:AttachRolePolicy
@@ -177,19 +189,12 @@ Resources:
                   - iam:PassRole
                   - iam:TagRole
                   - iam:UntagRole
-                  - lambda:TagResource
-                  - lambda:UntagResource
-                  - lambda:ListTags
-                  - states:TagResource
-                  - states:UntagResource
-                  - states:ListTagsForResource
-                  - logs:TagLogGroup
-                  - logs:TagResource
                   - logs:CreateLogGroup
                   - logs:DeleteLogGroup
                   - logs:PutRetentionPolicy
                   - logs:DescribeLogGroups
-                  - logs:DescribeResourcePolicies
+                  - logs:TagLogGroup
+                  - logs:TagResource
                   - s3:GetObject
                   - cloudformation:CreateChangeSet
                   - cloudformation:DescribeStackEvents
@@ -200,10 +205,10 @@ Resources:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub "${AWS::StackName}-build"
-      Description: Packages Lambda functions and uploads to S3
+      Description: Builds and packages the v2 durable Lambda function
       Source:
         Type: CODEPIPELINE
-        BuildSpec: buildspec.yml
+        BuildSpec: v2/buildspec.yml
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -227,7 +232,7 @@ Resources:
         Location: !Ref ArtifactBucket
       Stages:
 
-        # Stage 1 — Source: pull from GitHub on every push via CodeStar Connection
+        # Stage 1 - Source: pull from GitHub on every push via CodeStar Connection
         - Name: Source
           Actions:
             - Name: Source
@@ -245,7 +250,7 @@ Resources:
                 DetectChanges: true
               RunOrder: 1
 
-        # Stage 2 — Build: zip Lambdas, upload to S3, output packaged.yaml
+        # Stage 2 - Build: sam build (installs deps) + sam package (uploads to S3)
         - Name: Build
           Actions:
             - Name: Build
@@ -262,7 +267,7 @@ Resources:
                 ProjectName: !Ref CodeBuildProject
               RunOrder: 1
 
-        # Stage 3 — Deploy: run CloudFormation with the packaged template
+        # Stage 3 - Deploy: run CloudFormation with the packaged template
         - Name: Deploy
           Actions:
             - Name: Deploy

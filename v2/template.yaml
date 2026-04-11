@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Polling Monitor Pattern v2 - AWS Lambda Durable Execution SDK.
+  A single durable Lambda function replaces the Step Functions + Lambda
+  orchestration pattern. Checkpoints are managed by the SDK automatically.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 900
+    MemorySize: 128
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+
+  PollingMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-polling-monitor"
+      CodeUri: src/polling_monitor/
+      Handler: handler.lambda_handler
+      Description: >
+        Durable polling monitor. Checks a process status on a configurable
+        interval with automatic checkpointing and fault tolerance.
+      DurableConfig:
+        ExecutionTimeout: 3600
+        RetentionPeriodInDays: 7
+      AutoPublishAlias: live
+      Policies:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicDurableExecutionRolePolicy
+
+  InvokerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-invoker"
+      CodeUri: src/invoker/
+      Handler: handler.lambda_handler
+      Timeout: 30
+      Description: >
+        Invokes the durable polling monitor Lambda asynchronously.
+        Pass process_id, target_status, poll_interval_seconds, max_attempts in the event.
+      Environment:
+        Variables:
+          DURABLE_FUNCTION_NAME: !Ref PollingMonitorFunction.Alias
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource:
+              - !GetAtt PollingMonitorFunction.Arn
+              - !Ref PollingMonitorFunction.Alias
+
+Outputs:
+  PollingMonitorFunctionArn:
+    Description: ARN of the polling monitor Lambda function
+    Value: !GetAtt PollingMonitorFunction.Arn
+
+  PollingMonitorAliasArn:
+    Description: Alias ARN to use for invocations (durable functions require qualified ARNs)
+    Value: !Ref PollingMonitorFunction.Alias
+    Export:
+      Name: !Sub "${AWS::StackName}-PollingMonitorAliasArn"
+
+  InvokerFunctionArn:
+    Description: ARN of the invoker Lambda function
+    Value: !GetAtt InvokerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-InvokerFunctionArn"

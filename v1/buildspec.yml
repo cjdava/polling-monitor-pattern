@@ -16,14 +16,15 @@ phases:
 
   pre_build:
     commands:
-      - echo "Running sam package..."
+      - echo "Running sam package for v1..."
 
   build:
     commands:
+      - cd v1
       - sam package
           --template-file template.yaml
           --s3-bucket $ARTIFACT_BUCKET
-          --output-template-file packaged.yaml
+          --output-template-file ../packaged.yaml
 
   post_build:
     commands:
