@@ -2,8 +2,7 @@ import logging
 from aws_durable_execution_sdk_python import DurableContext, durable_execution
 from aws_durable_execution_sdk_python.config import Duration
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 
 
 @durable_execution
@@ -24,6 +23,7 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
             "max_attempts": 30
         }
     """
+    logger = context.logger
     process_id: str = event["process_id"]
     target_status: str = event["target_status"]
     poll_interval_seconds: int = event["poll_interval_seconds"]
@@ -40,7 +40,7 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
         # Each check is a named checkpoint — on replay, completed steps
         # return their stored result instantly without re-executing.
         status = context.step(
-            lambda _, _pid=process_id, _a=attempt, _m=max_attempts: get_process_status(_pid, _a, _m),
+            lambda _, _pid=process_id, _a=attempt, _m=max_attempts: get_process_status(_pid, _a, _m, logger),
             name=f"check-status-{attempt}",
         )
 
@@ -55,7 +55,7 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
         if status == target_status:
             # Target reached — run completion logic inline as a checkpoint.
             result = context.step(
-                lambda _, _pid=process_id, _s=status, _a=attempt: handle_completion(_pid, _s, _a),
+                lambda _, _pid=process_id, _s=status, _a=attempt: handle_completion(_pid, _s, _a, logger),
                 name="on-complete",
             )
             return {
@@ -76,7 +76,7 @@ def lambda_handler(event: dict, context: DurableContext) -> dict:
     )
 
 
-def get_process_status(process_id: str, attempt: int, max_attempts: int) -> str:
+def get_process_status(process_id: str, attempt: int, max_attempts: int, logger) -> str:
     """
     Stub status check for local/demo testing.
 
@@ -98,7 +98,7 @@ def get_process_status(process_id: str, attempt: int, max_attempts: int) -> str:
     return "IN_PROGRESS"
 
 
-def handle_completion(process_id: str, status: str, attempts: int) -> dict:
+def handle_completion(process_id: str, status: str, attempts: int, logger) -> dict:
     """
     Runs once when the target status is reached.
 
