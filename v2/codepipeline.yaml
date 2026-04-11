@@ -165,6 +165,18 @@ Resources:
                   - lambda:TagResource
                   - lambda:UntagResource
                   - lambda:ListTags
+                  - lambda:PublishVersion
+                  - lambda:ListVersionsByFunction
+                  - lambda:CreateAlias
+                  - lambda:UpdateAlias
+                  - lambda:DeleteAlias
+                  - lambda:GetAlias
+                  - lambda:ListAliases
+                  - lambda:PutFunctionEventInvokeConfig
+                  - lambda:DeleteFunctionEventInvokeConfig
+                  - lambda:GetFunctionEventInvokeConfig
+                  - lambda:PutFunctionConcurrency
+                  - lambda:DeleteFunctionConcurrency
                   - iam:CreateRole
                   - iam:DeleteRole
                   - iam:AttachRolePolicy
